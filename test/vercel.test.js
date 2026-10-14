@@ -11,5 +11,5 @@ test('Vercel exporteert een handler en verwerkt geparste JSON op HTTPS',async()=
 test('andere origins worden geweigerd en statische pagina blijft bruikbaar',async()=>{
  const denied=response();await handler({url:'/api/search',method:'POST',headers:{host:'gifted.vercel.app',origin:'https://other.example'},body:{}},denied);assert.equal(denied.status,403);
  const page=response();await handler({url:'/',method:'GET',headers:{}},page);assert.equal(page.status,200);assert.match(page.body.toString(),/Gifted/);
- const config=JSON.parse(await readFile(new URL('../vercel.json',import.meta.url)));assert.equal(config.outputDirectory,'public');assert.equal(typeof handler,'function');
+ const config=JSON.parse(await readFile(new URL('../vercel.json',import.meta.url)));assert.equal(config.buildCommand,'npm run build');assert.equal(typeof handler,'function');
 });

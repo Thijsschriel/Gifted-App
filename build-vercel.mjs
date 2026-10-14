@@ -1,0 +1,11 @@
+import {mkdir,cp,copyFile,writeFile} from 'node:fs/promises';
+const output=new URL('./.vercel/output/',import.meta.url);
+const func=new URL('functions/api/search.func/',output);
+await mkdir(new URL('api/',func),{recursive:true});
+await mkdir(new URL('static/',output),{recursive:true});
+await cp(new URL('./public/',import.meta.url),new URL('static/',output),{recursive:true});
+await cp(new URL('./public/',import.meta.url),new URL('public/',func),{recursive:true});
+for(const file of ['server.js','search.js','package.json','api/search.js'])await copyFile(new URL(file,import.meta.url),new URL(file,func));
+await writeFile(new URL('.vc-config.json',func),JSON.stringify({runtime:'nodejs22.x',handler:'api/search.js',launcherType:'Nodejs',maxDuration:60,supportsResponseStreaming:true},null,2));
+await writeFile(new URL('config.json',output),JSON.stringify({version:3,routes:[{src:'/api/search',dest:'/api/search'},{handle:'filesystem'},{src:'/',dest:'/index.html'}]},null,2));
+console.log('Vercel-build gereed: statische Gifted-app en Node.js-zoekfunctie.');

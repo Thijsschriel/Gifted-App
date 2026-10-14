@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
     "dev": "node --env-file-if-exists=.env --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node build-vercel.mjs"
   },
-  "engines": { "node": ">=22.9.0" }
+  "engines": { "node": "22.x" }
 }
