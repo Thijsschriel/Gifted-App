@@ -1,3 +1,4 @@
+import {parseInterests,planInterests,combineInterests} from './interest-search.js';
 import {checkIdea} from './relevance.js';
 import {selectIdeas,catalog,shoppingLinks} from './catalog.js';
 
@@ -5,7 +6,7 @@ import {selectIdeas,catalog,shoppingLinks} from './catalog.js';
 const $ = id => document.getElementById(id);
 const form = $('gift-form');
 const euro = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
-const key = 'gifted-session-v3';
+const key = 'gifted-session-v5';
 let state = { input: null, ideas: [], favorites: [], rejectedNames: [], seenNames: [] };
 try { const saved = JSON.parse(sessionStorage.getItem(key)); if (saved?.input && Array.isArray(saved.ideas) && Array.isArray(saved.favorites) && Array.isArray(saved.rejectedNames) && Array.isArray(saved.seenNames)) state = saved; } catch { /* Opslag kan uitgeschakeld zijn. */ }
 const save = () => { try { sessionStorage.setItem(key, JSON.stringify(state)); } catch { /* De app blijft in geheugen werken. */ } };
@@ -26,6 +27,7 @@ function shopLinks(name) {
   return container;
 }
 function photo(idea) {
+ if(idea.online){if(!idea.image)return element('div','Geen productfoto beschikbaar','image-unavailable');const img=element('img',undefined,'real-product-photo');img.src=idea.image;img.alt=idea.name;img.referrerPolicy='no-referrer';img.loading='lazy';img.onerror=()=>img.replaceWith(element('div','Productfoto niet beschikbaar','image-unavailable'));return img;}
  const item=catalog.find(i=>i.name===idea.name);const tags=item?.tags || [];
  const groups=[['koffie','thee'],['tuinieren','planten'],['schrijven','werken'],[],['wandelen','reizen'],['koken','bakken'],['creatief','kunst'],['spellen','puzzelen'],['muziek','technologie'],['ontspannen','wellness'],['fietsen'],['bloemen','chocolade','eten']];
  let scene=groups.findIndex(g=>g.some(t=>tags.includes(t)));if(scene<0)scene=tags.includes('lezen')?2:3;
@@ -66,31 +68,34 @@ function render() {
     row.append(detail, remove); $('favorites').append(row);
   }
 }
-function readForm() { const f = new FormData(form); return { relation: f.get('relation'), age: Number(f.get('age')), interests: f.get('interests').trim(), budgetMin: Number(f.get('budgetMin')), budgetMax: Number(f.get('budgetMax')), occasion: f.get('occasion'), exclusions: f.get('exclusions').trim() }; }
+function readForm() { const f = new FormData(form); return { relation: f.get('relation'), age: Number(f.get('age')), interests: parseInterests(f.get('interests')), budgetMin: Number(f.get('budgetMin')), budgetMax: Number(f.get('budgetMax')), occasion: f.get('occasion'), exclusions: f.get('exclusions').trim() }; }
 let busy = false;
 async function requestIdeas(more = false) {
   if (busy) return;
   if (!form.reportValidity()) return;
   const input = readForm();
   if (input.budgetMax < input.budgetMin) { $('error').textContent = 'Het maximumbudget moet minstens het minimumbudget zijn.'; $('error').hidden = false; return; }
-  if (!input.interests) { $('error').textContent = 'Vul minstens één interesse in.'; $('error').hidden = false; return; }
+  if (!input.interests.length) { $('error').textContent = 'Vul minstens één interesse in.'; $('error').hidden = false; return; }
   // Bij gewijzigde wensen begint een nieuwe lijst, ook via de knop Meer ideeën.
   const same = more && JSON.stringify(input) === JSON.stringify(state.input);
   busy = true; $('submit').disabled = true; $('more').disabled = true;
   $('error').hidden = true; $('status').textContent = 'We zoeken op internet naar je interesses…';
   document.querySelector('.results').setAttribute('aria-busy', 'true');
   try {
-    const identities=new Set();
-    const local=selectIdeas({...input,rejectedNames:same?state.rejectedNames:[],seenNames:same?state.seenNames:[]}).filter(i=>checkIdea(i,input,identities));
-    let data=local,warning='';
-    if(local.length) {
-      try {
-        const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({products:local.map(i=>i.name)}),signal:AbortSignal.timeout(20000)});
-        const result=await response.json();if(!response.ok || !Array.isArray(result.groups))throw new Error();
-        data=local.map(idea=>({...idea,links:result.groups.find(g=>g.interest===idea.name)?.results?.[0]?.links || shoppingLinks(idea.name)}));
-        if(result.groups.every(g=>!g.results.length))warning=' Er zijn geen bevestigde productlinks gevonden; de cadeau-ideeën blijven bruikbaar.';
-      }catch {warning=' Winkellinks konden niet worden gecontroleerd. Er zijn geen onbevestigde links toegevoegd.';}
-    }
+    const plans=planInterests({...input,rejectedNames:same?state.rejectedNames:[],seenNames:same?state.seenNames:[]});
+    const combined=combineInterests(plans);let data=combined.ideas,warning='';
+    const jobs=plans.map(p=>({interest:p.interest,terms:p.terms,discovery:p.candidates.length===0}));
+    try {
+      const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plans:jobs,input:{age:input.age,budgetMin:input.budgetMin,budgetMax:input.budgetMax,exclusions:input.exclusions,rejectedNames:same?state.rejectedNames:[],seenNames:same?state.seenNames:[]}}),signal:AbortSignal.timeout(240000)});
+      const result=await response.json();if(!response.ok || !Array.isArray(result.groups))throw new Error(result.error || 'Linkcontrole niet beschikbaar.');
+      data=data.map(idea=>({...idea,links:result.groups.flatMap(g=>g.results).find(r=>r.name===idea.name)?.links || shoppingLinks(idea.name)}));
+      for(const group of result.groups){const plan=plans.find(p=>p.interest===group.interest);if(!plan)continue;const found=group.results.filter(p=>p.online);plan.candidates.push(...found);plan.found=plan.candidates.length;}
+      const all=combineInterests(plans);data=all.ideas.map(p=>p.online?p:{...p,links:data.find(i=>i.name===p.name)?.links||shoppingLinks(p.name)});combined.reports=all.reports;
+      if(result.groups.every(g=>!g.results.length))warning=' Geen bevestigde winkellinks gevonden.';
+    }catch(error){warning=' '+(error.message || 'Linkcontrole niet beschikbaar.');}
+    const report=combined.reports.map(g=>`${g.interest}: ${g.found} passende ideeën, ${g.shown} getoond`).join(' · ');
+    $('interest-report').textContent=report;
+    if(!data.length){state={input,ideas:[],favorites:same?state.favorites:[],rejectedNames:same?state.rejectedNames:[],seenNames:same?state.seenNames:[]};save();render();$('status').textContent='Geen passende cadeauconcepten gevonden. Alle interesses zijn onderzocht.'+warning;return;}
     if (!data.length) throw new Error('Geen nieuwe ideeën die aansluiten bij deze interesses en dit budget. Probeer een andere interesse of verruim je budget. We vullen de lijst niet aan met willekeurige cadeaus.');
     state = { input, ideas: data, favorites: same ? state.favorites : [], rejectedNames: same ? state.rejectedNames : [], seenNames: [...(same ? state.seenNames : []), ...data.map(i => i.name)] };
     save(); render(); $('status').textContent = data.length + ' concrete cadeau-ideeën. Prijzen zijn indicaties, geen actuele winkelprijzen.' + warning;
@@ -104,7 +109,7 @@ $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText(text); $('status').textContent = 'Je favorieten zijn gekopieerd.'; }
   catch { $('error').textContent = 'Kopiëren is niet toegestaan in deze browser. Selecteer de favorieten en kopieer ze handmatig.'; $('error').hidden = false; }
 };
-if (state.input) for (const [name, value] of Object.entries(state.input)) if (form.elements.namedItem(name)) form.elements.namedItem(name).value = value;
+if (state.input) for (const [name, value] of Object.entries(state.input)) if (form.elements.namedItem(name)) form.elements.namedItem(name).value = Array.isArray(value) ? value.join(', ') : value;
 render();
 for(const name of ['Persoonlijke mok','Notitieboek','Plantenpot','Chocoladeassortiment','Picknickkleed','Aquarelset']) {
  const item=catalog.find(i=>i.name===name);const card=element('article',undefined,'card');const top=element('div',undefined,'card-top');top.append(element('h3',item.name),element('span',euro.format(item.price),'price'));card.append(photo(item),top,element('p',item.description),element('div',item.shop,'shop'),shopLinks(item.name));$('discover-cards').append(card);
@@ -126,6 +131,7 @@ document.querySelectorAll('[data-occasion]').forEach(button => button.onclick = 
   document.querySelectorAll('[data-occasion]').forEach(b=>b.classList.toggle('selected',b===button));
   navigate('gift-form','nav-discover');
 });
+
 
 
 

@@ -144,7 +144,7 @@ export function selectIdeas(input) {
   // Spreid de selectie over opgegeven interesses, daarna op relevantie.
   const selected = [];
   const coverage = new Map(interests.map(w => [w,0]));
-  while (ranked.length && selected.length < 10) {
+  while (ranked.length && selected.length < (input.limit ?? 10)) {
     ranked.sort((a,b) => Math.min(...a.matches.map(w=>coverage.get(w))) - Math.min(...b.matches.map(w=>coverage.get(w))) || b.score-a.score);
     const next = ranked.shift(); selected.push(next);
     next.matches.forEach(w=>coverage.set(w,coverage.get(w)+1));

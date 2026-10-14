@@ -7,24 +7,24 @@ const files = new Map([
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/relevance.js', ['relevance.js', 'text/javascript; charset=utf-8']],
   ['/catalog.js', ['catalog.js', 'text/javascript; charset=utf-8']],
+  ['/interest-search.js', ['interest-search.js', 'text/javascript; charset=utf-8']],
   ['/gift-scenes.png', ['gift-scenes.png', 'image/png']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']]
 ]);
-export function createApp() {
-  return http.createServer(async (req, res) => {
+export async function requestHandler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       if (req.method === 'POST' && req.url === '/api/search') {
-        if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) { res.writeHead(403); return res.end(); }
-        let body='';
-        for await (const chunk of req) { body+=chunk; if (Buffer.byteLength(body)>10000) { res.writeHead(413); return res.end(); } }
-        let interests;
-        try { interests=JSON.parse(body).products; } catch { res.writeHead(400); return res.end(JSON.stringify({error:'Ongeldig formulier.'})); }
+        if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) { res.writeHead(403); return res.end(); }
+        let body=req.body ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : '';
+        if (!req.body) for await (const chunk of req) { body+=chunk; if (Buffer.byteLength(body)>10000) { res.writeHead(413); return res.end(); } }
+        let interests, input;
+        try { const parsed=JSON.parse(body);interests=parsed.plans;input=parsed.input || {}; } catch { res.writeHead(400); return res.end(JSON.stringify({error:'Ongeldig formulier.'})); }
         try {
-          const result = await searchInterests(interests);
+          const result = await searchInterests(interests,fetch,input);
           res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'}); return res.end(JSON.stringify(result));
         } catch(error) { res.writeHead(400,{'Content-Type':'application/json; charset=utf-8'}); return res.end(JSON.stringify({error:error.message})); }
       }
@@ -40,12 +40,14 @@ export function createApp() {
       res.writeHead(500, { 'Content-Type':'application/json; charset=utf-8' });
       res.end(JSON.stringify({error:'Er ging iets mis. Probeer opnieuw.'}));
     }
-  });
 }
+export function createApp() { return http.createServer(requestHandler); }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 3001);
   createApp().listen(port, '127.0.0.1', () => console.log(`Gifted: http://localhost:${port}`));
 }
+
+
 
 
 
